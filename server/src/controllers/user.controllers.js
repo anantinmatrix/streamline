@@ -172,6 +172,30 @@ export const logoutUser = asyncHandler(async (req, res) => {
     res.clearCookie("accessToken", options)
     res.clearCookie("refreshToken", options)
     res.json(new ApiResponse(200, {}, "User logout successfully."))
+})
 
+// change password
+export const changeCurrentPassword = asyncHandler(async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
 
+    if(!oldPassword || !newPassword){
+        throw new ApiError(400, "Enter current and new password.")
+    }
+
+    // fetching user from the database
+    const user = await User.findById(req.user?._id);
+    // checking if the old password is correct or not
+    const oldPasswordVerification = await user.isPasswordCorrect(oldPassword);
+    console.log(oldPassword, oldPasswordVerification, newPassword, "just to show the current and the new password.")
+    if (!oldPasswordVerification) {
+        throw new ApiError(400, "You entered wrong current password")
+    }
+    // changing current password to new password
+    user.password = newPassword;
+    await user.save();
+
+    const responseUser = await User.findById(user._id).select("-password -refreshToken")
+
+    return res.status(201)
+    .json(new ApiResponse(200, responseUser, "Password changed successfully."))
 })
