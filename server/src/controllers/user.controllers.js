@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
@@ -300,7 +301,7 @@ export const updateUserCoverImage = asyncHandler(async (req, res) => {
 
 // getting user channel profile **********************
 export const getUserChannelProfile = asyncHandler(async (req, res) => {
-    const {username} = req.params;
+    const { username } = req.params;
 
     console.log(username)
 
@@ -356,8 +357,8 @@ export const getUserChannelProfile = asyncHandler(async (req, res) => {
             $project: {
                 fullname: 1,
                 username: 1,
-                subscribersCount : 1,
-                channelsSubscribedToCounts : 1,
+                subscribersCount: 1,
+                channelsSubscribedToCounts: 1,
                 isSubscribed: 1,
                 avatar: 1,
                 coverImage: 1,
@@ -366,13 +367,83 @@ export const getUserChannelProfile = asyncHandler(async (req, res) => {
         }
     ])
 
-    if(!channel?.length){
+    if (!channel?.length) {
         throw new ApiError(404, "Couldn't fetch channel details.")
     }
 
     console.log(channel)
 
     return res.status(200)
-    .json(new ApiResponse(200, channel, "User fetched successfully"))
+        .json(new ApiResponse(200, channel, "User fetched successfully"))
+})
+
+
+// getting user's watch history *****************
+export const getUserWatchHistory = asyncHandler(async (req, res) => {
+
+    // getting user details
+    const user = await User.aggregate([
+        // match pipeline to find user
+        {
+            $match: {
+                _id: new mongoose.Types.ObjectId(req.user?._id)
+            }
+        },
+        // lookup pipeline to look for watch history in user channel
+        {
+            $lookup: {
+                from: "videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watch_history",
+                // nested pipeline to populate or add user as nested fields
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "owner",
+                            foreignField: "_id",
+                            as: "owner",
+                            // nested or sub pipeline to project user fields
+                            pipeline: [
+                                {
+                                    $project: {
+                                        username: 1,
+                                        fullName: 1,
+                                        avatar: 1,
+                                        coverImage: 1,
+
+                                    }
+                                },
+                            ]
+                        }
+                    },
+                    {
+                        $addFields: {
+                            owner: {
+                                $first: "$owner"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            $project:{
+                username:1,
+                fullName:1,
+                email:1,
+                watchHistory: 1,
+                
+            }
+        }
+    ])
+
+    if(!user?.length){
+        throw new ApiError(400, "User not found.")
+    }
+
+    res.status(200)
+    .json(new ApiResponse(200, user, "Fetched watch history"))
 })
 
