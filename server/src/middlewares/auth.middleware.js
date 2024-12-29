@@ -9,7 +9,6 @@ export const authMiddleware = asyncHandler((async (req, res, next) => {
         const accessToken = req.cookies?.accessToken || req.header
             ("Authorization")?.replace("Bearer ", "");
 
-        console.log("req cookies : ",req.cookies?.accessToken)
         if (!accessToken) {
             throw new ApiError(401, "Unauthorized request")
         }
@@ -20,7 +19,6 @@ export const authMiddleware = asyncHandler((async (req, res, next) => {
         if (!user) {
             throw new ApiError(401, "Invalid accessToken.")
         }
-        console.log(user)
         req.user = user;
         next();
 

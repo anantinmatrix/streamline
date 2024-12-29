@@ -3,6 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { cloudinaryUpload } from "../utils/cloudinary.upload.js";
+import { delelteCloudFile } from "../utils/deleteOldCloudFile.js";
 
 
 
@@ -26,6 +27,7 @@ const generateAccessAndRefreshToken = async (userId) => {
 
 
 // ********************* CONTROLLERS **********************
+// registering new user **********************
 export const registerUser = asyncHandler(async (req, res) => {
     // get user filled fields
     let { fullName, email, username, password, avatar, coverImage } = req.body;
@@ -89,7 +91,7 @@ export const registerUser = asyncHandler(async (req, res) => {
 })
 
 
-// user login controller
+// user login controller **********************
 export const userLogin = asyncHandler(async (req, res, next) => {
     let { email, username, password } = req.body;
     // check if all fields are filled
@@ -148,7 +150,7 @@ export const userLogin = asyncHandler(async (req, res, next) => {
 })
 
 
-// logout controller
+// logout controller **********************
 export const logoutUser = asyncHandler(async (req, res) => {
     //finding user and updating it
     await User.findByIdAndUpdate(
@@ -174,11 +176,11 @@ export const logoutUser = asyncHandler(async (req, res) => {
     res.json(new ApiResponse(200, {}, "User logout successfully."))
 })
 
-// change password
+// change password **********************
 export const changeCurrentPassword = asyncHandler(async (req, res) => {
     const { oldPassword, newPassword } = req.body;
 
-    if(!oldPassword || !newPassword){
+    if (!oldPassword || !newPassword) {
         throw new ApiError(400, "Enter current and new password.")
     }
 
@@ -197,5 +199,180 @@ export const changeCurrentPassword = asyncHandler(async (req, res) => {
     const responseUser = await User.findById(user._id).select("-password -refreshToken")
 
     return res.status(201)
-    .json(new ApiResponse(200, responseUser, "Password changed successfully."))
+        .json(new ApiResponse(200, responseUser, "Password changed successfully."))
 })
+
+// editing user details ********************
+export const updateUserDetails = asyncHandler(async (req, res) => {
+    const { email, fullName } = req.body;
+
+    // checking if any field is empty
+    if (!email || !fullName) {
+        throw new ApiError(400, "Fill all the required fields.")
+    }
+
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set: {
+                fullName,
+                email
+            }
+        },
+        { new: true }
+    ).select("-password -refreshToken")
+
+    return res.status(200)
+        .json(new ApiResponse(200, user, "Email and Full Name has been changed successfully."))
+})
+
+
+// changing user's avatar ***************
+export const updateUserAvatar = asyncHandler(async (req, res) => {
+    // getting new file
+    const avatarLocalPath = req.file?.path;
+
+    // checking if file is available or not
+    if (!avatarLocalPath) {
+        throw new ApiError(400, "Avatar file is missing.")
+    }
+
+    const avatar = await cloudinaryUpload(avatarLocalPath);
+    if (!avatar.url) {
+        throw new ApiError(500, "Error while uploading avatar file to cloud in controllers.")
+    }
+
+    // getting the user's old avatar image from this to put into deleteCloudFile function
+    const oldAvatar = await User.findById(req.user?._id)
+
+    // updating user's avatar and saving it
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set: {
+                avatar: avatar.secure_url
+            }
+        },
+        { new: true }
+    ).select("-password -refreshToken")
+
+    // function to delete the old avatar image from the cloud
+    await delelteCloudFile(oldAvatar.avatar)
+
+    res.status(201)
+        .json(new ApiResponse(200, user, "Updated avatar successfully"))
+})
+
+
+// changing user's cover image ****************
+export const updateUserCoverImage = asyncHandler(async (req, res) => {
+    // getting new file
+    const coverImageLocalPath = req.file?.path;
+
+    // checking if file is available or not
+    if (!coverImageLocalPath) {
+        throw new ApiError(400, "Avatar file is missing.")
+    }
+
+    const coverImage = await cloudinaryUpload(coverImageLocalPath)
+    if (!coverImage.url) {
+        throw new ApiError(500, "Error while uploading cover image file to cloud in controllers.")
+    }
+
+    const oldCoverImage = await User.findById(req.user?._id);
+
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set: {
+                coverImage: coverImage.secure_url
+            }
+        },
+        { new: true }
+    ).select("-password -refreshToken")
+
+    // deleting old coverImage from the cloud
+    await delelteCloudFile(oldCoverImage.coverImage)
+
+    res.status(201)
+        .json(new ApiResponse(200, user, "Updated cover image successfully"))
+})
+
+// getting user channel profile **********************
+export const getUserChannelProfile = asyncHandler(async (req, res) => {
+    const {username} = req.params;
+
+    console.log(username)
+
+    if (!username?.trim()) {
+        throw new ApiError(404, "No parameters detected.")
+    }
+
+    const channel = await User.aggregate([
+        // match pipeline
+        {
+            $match: {
+                username: username?.toLowerCase()
+            },
+        },
+        // lookup for subscribers pipeline
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "channel",
+                as: "subscribers"
+            }
+        },
+        // lookup for subscribed to pipeline
+        {
+            $lookup: {
+                from: 'subscriptions',
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscribed_to"
+            }
+        },
+        // pipelines to add fields
+        {
+            $addFields: {
+                subscribersCount: {
+                    $size: "$subscribers"
+                },
+                channelsSubscribedToCounts: {
+                    $size: "$subscribed_to"
+                },
+                isSubscribed: {
+                    $cond: {
+                        if: { $in: [req.user?._id, "$subscribers.subscriber"] },
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },
+        // projection pipeline
+        {
+            $project: {
+                fullname: 1,
+                username: 1,
+                subscribersCount : 1,
+                channelsSubscribedToCounts : 1,
+                isSubscribed: 1,
+                avatar: 1,
+                coverImage: 1,
+                email: 1
+            }
+        }
+    ])
+
+    if(!channel?.length){
+        throw new ApiError(404, "Couldn't fetch channel details.")
+    }
+
+    console.log(channel)
+
+    return res.status(200)
+    .json(new ApiResponse(200, channel, "User fetched successfully"))
+})
+
